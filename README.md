@@ -79,22 +79,7 @@ car-rental-k8s/
 
 ---
 
-## Push This Repo to GitHub
-
-This repo has a remote already configured (`origin` → `https://github.com/chetan080808/Carrental_Ci-CD.git`) but **no commits yet** — none of this has been pushed. A `.gitignore` excludes the local `.claude/` folder (Claude Code's machine-specific settings) so it never reaches GitHub.
-
-```bash
-git add .
-git commit -m "Initial commit: Docker + K8s + CI/CD setup"
-git push -u origin main
-```
-
-If `.claude/` was ever committed in an earlier attempt, untrack it first (it's already excluded going forward, this just removes it from what's already staged/tracked):
-```bash
-git rm -r --cached .claude
-```
-
-Once pushed, add the `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN` repo secrets and set up the self-hosted runner (see [CI/CD with GitHub Actions](#cicd-with-github-actions) below) so the pipeline can build, push, and deploy on every merge to `main`.
+add the `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN` repo secrets and set up the self-hosted runner (see [CI/CD with GitHub Actions](#cicd-with-github-actions) below) so the pipeline can build, push, and deploy on every merge to `main`.
 
 ---
 
@@ -264,6 +249,59 @@ Example output: `192.168.49.2`
 - Server: `mysql`
 - Username: `root`
 - Password: `rootpassword`
+
+---
+
+## CI/CD with GitHub Actions
+
+The pipeline lives at `.github/workflows/ci-cd.yml` and has three jobs:
+
+| Job                 | Runs on           | Trigger                          | What it does |
+|---------------------|-------------------|-----------------------------------|--------------|
+| `lint-and-validate`  | GitHub-hosted     | Every push & PR to `main`        | `php -l` syntax-checks every file in `app/`, and `kubeconform` validates every manifest in `k8s/` against the Kubernetes schema. |
+| `build-and-push`     | GitHub-hosted     | Push to `main` only (not PRs)    | Builds `app/Dockerfile` and `mysql/Dockerfile`, tags each image `latest` + `sha-<commit>`, pushes both to Docker Hub. |
+| `deploy`             | **Self-hosted** (your EC2 box) | After `build-and-push` succeeds | `kubectl apply -f k8s/`, then pins `carrental-web` to the freshly-built `sha-<commit>` image and waits for the rollout to finish. |
+
+A PR only runs lint/validate. Merging to `main` builds, pushes, and deploys.
+
+### One-time setup
+
+**1. Repo secrets** (Settings → Secrets and variables → Actions):
+| Secret | Value |
+|---|---|
+| `DOCKERHUB_USERNAME` | Your Docker Hub username |
+| `DOCKERHUB_TOKEN` | A Docker Hub [access token](https://hub.docker.com/settings/security) (not your password) |
+
+**2. Self-hosted runner on your EC2 instance**, where the Kubernetes cluster (Minikube/k3s/kind) also runs:
+```bash
+# On the EC2 box
+mkdir actions-runner && cd actions-runner
+curl -o actions-runner.tar.gz -L https://github.com/actions/runner/releases/latest/download/actions-runner-linux-x64.tar.gz
+tar xzf actions-runner.tar.gz
+./config.sh --url https://github.com/<you>/<repo> --token <token-from-repo-settings>
+sudo ./svc.sh install
+sudo ./svc.sh start
+```
+Get the registration token from **Settings → Actions → Runners → New self-hosted runner**. Leave the default label (`self-hosted`) — the workflow targets it as-is.
+
+The runner's user needs a working `kubectl` pointed at your cluster (`kubectl config current-context` should succeed) — same shell/user the runner service runs as.
+
+**3. (Optional) Protect the deploy step** — create a GitHub **Environment** named `production` (Settings → Environments) and add required reviewers. The `deploy` job already targets this environment, so once configured, every deploy waits for manual approval before touching the cluster.
+
+> Note: `k8s/04-mysql-deployment.yaml` currently runs the stock `mysql:8.0` image and loads data via an init container that curls `carrental.sql` from GitHub — it doesn't consume the `mysql/` custom image. The pipeline still builds/pushes it for parity with local `docker-compose`, but deploy only rolls out `carrental-web`. Say the word if you'd rather have the mysql Deployment use the built image instead.
+
+---
+
+## Next Steps
+
+Once you are comfortable with this setup, explore:
+
+- **Helm Charts** — package your K8s manifests as a reusable chart
+- **Horizontal Pod Autoscaler (HPA)** — auto-scale based on CPU/memory
+- **Liveness & Readiness Probes** — already configured in this project, read more in the K8s docs
+- **Resource Limits** — add `resources.requests` and `resources.limits` to each container
+- **Sealed Secrets / Vault** — proper secrets management for production
+- **Cloud Deployment (AWS)** — migrate this same setup to EKS, ECR, and RDS
 
 ---
 
@@ -452,55 +490,3 @@ minikube stop
 minikube delete
 ```
 
----
-
-## CI/CD with GitHub Actions
-
-The pipeline lives at `.github/workflows/ci-cd.yml` and has three jobs:
-
-| Job                 | Runs on           | Trigger                          | What it does |
-|---------------------|-------------------|-----------------------------------|--------------|
-| `lint-and-validate`  | GitHub-hosted     | Every push & PR to `main`        | `php -l` syntax-checks every file in `app/`, and `kubeconform` validates every manifest in `k8s/` against the Kubernetes schema. |
-| `build-and-push`     | GitHub-hosted     | Push to `main` only (not PRs)    | Builds `app/Dockerfile` and `mysql/Dockerfile`, tags each image `latest` + `sha-<commit>`, pushes both to Docker Hub. |
-| `deploy`             | **Self-hosted** (your EC2 box) | After `build-and-push` succeeds | `kubectl apply -f k8s/`, then pins `carrental-web` to the freshly-built `sha-<commit>` image and waits for the rollout to finish. |
-
-A PR only runs lint/validate. Merging to `main` builds, pushes, and deploys.
-
-### One-time setup
-
-**1. Repo secrets** (Settings → Secrets and variables → Actions):
-| Secret | Value |
-|---|---|
-| `DOCKERHUB_USERNAME` | Your Docker Hub username |
-| `DOCKERHUB_TOKEN` | A Docker Hub [access token](https://hub.docker.com/settings/security) (not your password) |
-
-**2. Self-hosted runner on your EC2 instance**, where the Kubernetes cluster (Minikube/k3s/kind) also runs:
-```bash
-# On the EC2 box
-mkdir actions-runner && cd actions-runner
-curl -o actions-runner.tar.gz -L https://github.com/actions/runner/releases/latest/download/actions-runner-linux-x64.tar.gz
-tar xzf actions-runner.tar.gz
-./config.sh --url https://github.com/<you>/<repo> --token <token-from-repo-settings>
-sudo ./svc.sh install
-sudo ./svc.sh start
-```
-Get the registration token from **Settings → Actions → Runners → New self-hosted runner**. Leave the default label (`self-hosted`) — the workflow targets it as-is.
-
-The runner's user needs a working `kubectl` pointed at your cluster (`kubectl config current-context` should succeed) — same shell/user the runner service runs as.
-
-**3. (Optional) Protect the deploy step** — create a GitHub **Environment** named `production` (Settings → Environments) and add required reviewers. The `deploy` job already targets this environment, so once configured, every deploy waits for manual approval before touching the cluster.
-
-> Note: `k8s/04-mysql-deployment.yaml` currently runs the stock `mysql:8.0` image and loads data via an init container that curls `carrental.sql` from GitHub — it doesn't consume the `mysql/` custom image. The pipeline still builds/pushes it for parity with local `docker-compose`, but deploy only rolls out `carrental-web`. Say the word if you'd rather have the mysql Deployment use the built image instead.
-
----
-
-## Next Steps
-
-Once you are comfortable with this setup, explore:
-
-- **Helm Charts** — package your K8s manifests as a reusable chart
-- **Horizontal Pod Autoscaler (HPA)** — auto-scale based on CPU/memory
-- **Liveness & Readiness Probes** — already configured in this project, read more in the K8s docs
-- **Resource Limits** — add `resources.requests` and `resources.limits` to each container
-- **Sealed Secrets / Vault** — proper secrets management for production
-- **Cloud Deployment (AWS)** — migrate this same setup to EKS, ECR, and RDS
