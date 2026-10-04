@@ -21,12 +21,12 @@ If you're a student following along, that's the point: **don't skip to the end**
 
 | Stage | What it covers | Where |
 |---|---|---|
-| 1. Dockerize | Take a plain PHP app and containerize it | [`docker-k8s-carrental`](https://github.com/chetan080808/docker-k8s-carrental) |
-| 2. Docker + Kubernetes | Deploy the containers on a Kubernetes cluster | [`docker-k8s-carrental`](https://github.com/chetan080808/docker-k8s-carrental) |
+| 1. Dockerize | Take a plain PHP app and containerize it | [`Carrental_Docker_Project`](https://github.com/chetan080808/Carrental_Docker_Project) |
+| 2. Docker + Kubernetes | Deploy the containers on a Kubernetes cluster | [`Carrental_K8s-Docker_Project`](https://github.com/chetan080808/Carrental_K8s-Docker_Project) |
 | 3. **Docker + K8s + CI/CD** | **Automate build → push → deploy with GitHub Actions** | **👉 this repo** |
 | 4. AWS Migration | Move the whole stack to EKS / ECR / RDS | upcoming |
 
-This README focuses on stage 3 — the pipeline that turns "I manually build, push, and `kubectl apply` every time" into "I push code and the rest happens by itself." For how the app was containerized and how the Kubernetes manifests in `k8s/` work in detail, see the [Docker + Kubernetes repo](https://github.com/chetan080808/docker-k8s-carrental) that's required reading before this stage makes sense.
+This README focuses on stage 3 — the pipeline that turns "I manually build, push, and `kubectl apply` every time" into "I push code and the rest happens by itself." For how the app was containerized and how the Kubernetes manifests in `k8s/` work in detail, see the [Docker + Kubernetes repo](https://github.com/chetan080808/Carrental_K8s-Docker_Project) that's required reading before this stage makes sense.
 
 ---
 
@@ -52,7 +52,7 @@ Before touching the pipeline, you need stages 1–2 already done:
 
 | Requirement | Why |
 |---|---|
-| A Kubernetes cluster already running (Minikube/k3s/kind) | The `deploy` job runs `kubectl` against it — build this first using the [Docker + Kubernetes repo](https://github.com/chetan080808/docker-k8s-carrental) |
+| A Kubernetes cluster already running (Minikube/k3s/kind) | The `deploy` job runs `kubectl` against it — build this first using the [Docker + Kubernetes repo](https://github.com/chetan080808/Carrental_K8s-Docker_Project) |
 | An EC2 instance hosting that cluster | This is where the self-hosted runner will live |
 | `kubectl` on that EC2 instance, already pointed at the cluster | Verify with `kubectl get nodes` before continuing |
 | A Docker Hub account | Destination registry for built images |
@@ -148,7 +148,7 @@ SSH into the EC2 box that hosts your Kubernetes cluster and confirm `kubectl` al
 kubectl get nodes
 kubectl get pods -n carrental
 ```
-If this doesn't work yet, go set up the cluster first (see the [Docker + Kubernetes repo](https://github.com/chetan080808/docker-k8s-carrental)) — the runner itself doesn't install or configure Kubernetes, it just needs `kubectl` to already be pointed at a working cluster.
+If this doesn't work yet, go set up the cluster first (see the [Docker + Kubernetes repo](https://github.com/chetan080808/Carrental_K8s-Docker_Project)) — the runner itself doesn't install or configure Kubernetes, it just needs `kubectl` to already be pointed at a working cluster.
 
 ### Step 4 — Get a Runner Registration Token
 In this GitHub repo: **Settings → Actions → Runners → New self-hosted runner → Linux → x64**
@@ -238,7 +238,7 @@ sudo ./svc.sh uninstall
 
 ## Accessing the Deployed App
 
-Once `deploy` succeeds, the app is reachable the same way it was in the Docker+K8s stage — NodePort or Ingress, depending on how `k8s/07-web-service.yaml` / `k8s/10-ingress.yaml` are configured. Full access instructions (node IP, ports, Ingress hosts file setup) are in the [Docker + Kubernetes repo](https://github.com/chetan080808/docker-k8s-carrental).
+Once `deploy` succeeds, the app is reachable the same way it was in the Docker+K8s stage — NodePort or Ingress, depending on how `k8s/07-web-service.yaml` / `k8s/10-ingress.yaml` are configured. Full access instructions (node IP, ports, Ingress hosts file setup) are in the [Docker + Kubernetes repo](https://github.com/chetan080808/Carrental_K8s-Docker_Project).
 
 **Default credentials** (seeded by `carrental.sql`):
 
