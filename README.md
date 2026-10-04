@@ -1,41 +1,32 @@
-# Car Rental Portal — Kubernetes Deployment
+# Car Rental Portal — CI/CD with GitHub Actions
 
-A PHP + MySQL car rental web application deployed on Kubernetes.  
-This project is designed as a hands-on learning guide for students to understand
-containerisation, Docker image building, and Kubernetes fundamentals.
+## 🚀 A DevOps Project, Built One Level at a Time
 
----
+This isn't a project that showed up finished. It's being **leveled up stage by stage**, on purpose — the same way most real teams actually adopt DevOps: start with something that just runs, then containerize it, then orchestrate it, then automate it, then take it to the cloud. Each stage is a complete, working checkpoint before the next one begins.
 
-## Architecture
+If you're a student following along, that's the point: **don't skip to the end**. Clone each stage, see what changed and why, and build the muscle memory one layer at a time instead of inheriting a finished black box.
 
 ```
-                        ┌─────────────────────────────────────────┐
-                        │           Kubernetes Cluster             │
-                        │         Namespace: carrental             │
-                        │                                          │
-  Browser               │  ┌──────────────┐   ┌────────────────┐  │
-    │                   │  │  carrental-  │   │  phpmyadmin    │  │
-    │  :30080 (web)     │  │  web (x2)    │   │  (x1)          │  │
-    ├──────────────────►│  │  PHP 8.2 +   │   │  DB GUI        │  │
-    │  :30081 (pma)     │  │  Apache      │   │  :30081        │  │
-    └──────────────────►│  └──────┬───────┘   └──────┬─────────┘  │
-                        │         │  ClusterIP         │           │
-                        │         └──────────┬─────────┘           │
-                        │                    ▼                      │
-                        │           ┌────────────────┐             │
-                        │           │  mysql (x1)    │             │
-                        │           │  MySQL 8.0     │             │
-                        │           │  + PVC (1Gi)   │             │
-                        │           └────────────────┘             │
-                        └─────────────────────────────────────────┘
+  Stage 1          Stage 2                Stage 3                      Stage 4
+┌─────────┐      ┌───────────┐        ┌──────────────────┐        ┌────────────────┐
+│ Plain   │ ───► │ Dockerized │ ───►  │  + Kubernetes      │ ───► │  + AWS (EKS /   │
+│ PHP app │      │  (app runs │       │  (self-healing,    │      │  ECR / RDS)     │
+│         │      │  in a      │       │  scalable pods)    │      │  production-    │
+│         │      │  container)│       │       +             │      │  grade cloud    │
+│         │      │            │       │   CI/CD (this repo)│      │  deployment     │
+│         │      │            │       │  (build→push→      │      │                 │
+│         │      │            │       │   deploy, hands-off)│      │                 │
+└─────────┘      └───────────┘        └──────────────────┘        └────────────────┘
 ```
 
-**Services exposed:**
-| Service       | Type     | Port  | URL                             |
-|---------------|----------|-------|---------------------------------|
-| carrental-web | NodePort | 30080 | `http://<node-ip>:30080`        |
-| phpmyadmin    | NodePort | 30081 | `http://<node-ip>:30081`        |
-| mysql         | ClusterIP| 3306  | Internal only (no external access)|
+| Stage | What it covers | Where |
+|---|---|---|
+| 1. Dockerize | Take a plain PHP app and containerize it | [`docker-k8s-carrental`](https://github.com/chetan080808/docker-k8s-carrental) |
+| 2. Docker + Kubernetes | Deploy the containers on a Kubernetes cluster | [`docker-k8s-carrental`](https://github.com/chetan080808/docker-k8s-carrental) |
+| 3. **Docker + K8s + CI/CD** | **Automate build → push → deploy with GitHub Actions** | **👉 this repo** |
+| 4. AWS Migration | Move the whole stack to EKS / ECR / RDS | upcoming |
+
+This README focuses on stage 3 — the pipeline that turns "I manually build, push, and `kubectl apply` every time" into "I push code and the rest happens by itself." For how the app was containerized and how the Kubernetes manifests in `k8s/` work in detail, see the [Docker + Kubernetes repo](https://github.com/chetan080808/docker-k8s-carrental) — that's required reading before this stage makes sense.
 
 ---
 
@@ -45,448 +36,243 @@ containerisation, Docker image building, and Kubernetes fundamentals.
 car-rental-k8s/
 ├── .github/
 │   └── workflows/
-│       └── ci-cd.yml           # GitHub Actions pipeline (lint → build/push → deploy)
+│       └── ci-cd.yml           # The GitHub Actions pipeline — see below
 ├── .gitignore                  # Excludes .claude/ and OS/editor junk
-├── app/                        # PHP web application
-│   ├── Dockerfile              # Builds the PHP + Apache image
-│   ├── index.php               # Homepage
-│   ├── car-listing.php         # Vehicle catalog
-│   ├── vehical-details.php     # Vehicle detail page
-│   ├── my-booking.php          # User bookings
-│   ├── admin/                  # Admin panel
-│   ├── includes/               # Shared PHP includes (config, header, footer)
-│   └── assets/                 # CSS, JS, images
-│
-├── mysql/
-│   ├── Dockerfile              # MySQL image with database pre-loaded
-│   └── carrental.sql           # Full database dump (schema + sample data)
-│
-├── k8s/                        # Kubernetes manifests (apply in order)
-│   ├── 00-namespace.yaml       # Namespace: carrental
-│   ├── 01-secret.yaml          # DB credentials (base64)
-│   ├── 02-configmap.yaml       # DB host and name
-│   ├── 03-mysql-pvc.yaml       # Persistent storage for MySQL (1Gi)
-│   ├── 04-mysql-deployment.yaml# MySQL pod
-│   ├── 05-mysql-service.yaml   # MySQL ClusterIP service
-│   ├── 06-web-deployment.yaml  # PHP/Apache pods (2 replicas)
-│   ├── 07-web-service.yaml     # Web NodePort service (:30080)
-│   ├── 08-phpmyadmin-deployment.yaml
-│   ├── 09-phpmyadmin-service.yaml  # phpMyAdmin NodePort (:30081)
-│   └── 10-ingress.yaml         # Optional: domain-based routing
-│
+├── app/                        # PHP web application (Dockerfile builds this)
+├── mysql/                      # MySQL Dockerfile + schema dump
+├── k8s/                        # Kubernetes manifests, applied by the deploy job
 └── README.md
 ```
 
 ---
 
-add the `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN` repo secrets and set up the self-hosted runner (see [CI/CD with GitHub Actions](#cicd-with-github-actions) below) so the pipeline can build, push, and deploy on every merge to `main`.
-
----
-
 ## Prerequisites
 
-Install these tools on your machine before starting:
+Before touching the pipeline, you need stages 1–2 already done:
 
-| Tool       | Purpose                              | Download                                     |
-|------------|--------------------------------------|----------------------------------------------|
-| Docker     | Build and push container images      | https://docs.docker.com/get-docker/          |
-| kubectl    | Kubernetes command-line tool         | https://kubernetes.io/docs/tasks/tools/      |
-| Minikube   | Run Kubernetes locally (recommended) | https://minikube.sigs.k8s.io/docs/start/     |
+| Requirement | Why |
+|---|---|
+| A Kubernetes cluster already running (Minikube/k3s/kind) | The `deploy` job runs `kubectl` against it — build this first using the [Docker + Kubernetes repo](https://github.com/chetan080808/docker-k8s-carrental) |
+| An EC2 instance hosting that cluster | This is where the self-hosted runner will live |
+| `kubectl` on that EC2 instance, already pointed at the cluster | Verify with `kubectl get nodes` before continuing |
+| A Docker Hub account | Destination registry for built images |
+| Admin access to this GitHub repo's **Settings** | To add secrets and register the runner |
 
-> **Alternatives to Minikube:** kind, Docker Desktop Kubernetes, or any cloud cluster (GKE, EKS, AKS).
-
-### Verify installations
-
-```bash
-docker --version
-kubectl version --client
-minikube version
-```
+If any of the above isn't done yet, do that first — this README assumes it's working.
 
 ---
 
-## Step 1 — Start Minikube
+## Push This Repo to GitHub
 
 ```bash
-minikube start --driver=docker --memory=2048 --cpus=2
+git add .
+git commit -m "Initial commit: Docker + K8s + CI/CD setup"
+git push -u origin main
 ```
 
-Check it is running:
-
+`.gitignore` already excludes `.claude/` (Claude Code's local settings) so it never reaches GitHub. If it was ever committed in an earlier attempt, untrack it:
 ```bash
-minikube status
-kubectl get nodes
+git rm -r --cached .claude
 ```
-
-You should see one node with status `Ready`.
-
----
-
-## Step 2 — Build Docker Images
-
-You need two custom images:
-1. **Web image** — PHP + Apache with the application code
-2. **MySQL image** — MySQL pre-loaded with the `carrental` database
-
-### 2a. Build the web image
-
-```bash
-docker build -t chetan0808/carrental-web:latest ./app
-```
-
-### 2b. Build the MySQL image
-
-```bash
-docker build -t chetan0808/carrental-mysql:latest ./mysql
-```
-
-Replace `chetan0808` with your actual Docker Hub username (e.g. `john123`).
-
----
-
-## Step 3 — Push Images to Docker Hub
-
-Docker Hub is a free public registry. Images pushed here can be pulled by Kubernetes.
-
-### Login
-
-```bash
-docker login
-```
-
-### Push both images
-
-```bash
-docker push chetan0808/carrental-web:latest
-docker push chetan0808/carrental-mysql:latest
-```
-
----
-
-## Step 4 — Update Image Names in Manifests
-
-Open these two files and replace `chetan0808` with your actual username:
-
-**`k8s/04-mysql-deployment.yaml`** — line with `image:`:
-```yaml
-image: chetan0808/carrental-mysql:latest
-```
-
-**`k8s/06-web-deployment.yaml`** — line with `image:`:
-```yaml
-image: chetan0808/carrental-web:latest
-```
-
----
-
-## Step 5 — Deploy to Kubernetes
-
-Apply all manifests in order using a single command:
-
-```bash
-kubectl apply -f k8s/
-```
-
-This applies all YAML files in the `k8s/` folder in alphabetical order (00 → 10).
-
-### Verify everything is running
-
-```bash
-# Watch pods come up (Ctrl+C to stop watching)
-kubectl get pods -n carrental -w
-
-# Check all resources
-kubectl get all -n carrental
-```
-
-Expected output (all pods should show `Running`):
-```
-NAME                                READY   STATUS    RESTARTS   AGE
-pod/mysql-xxxxxxxxxx-xxxxx          1/1     Running   0          2m
-pod/carrental-web-xxxxxxxxxx-xxxxx  1/1     Running   0          90s
-pod/carrental-web-xxxxxxxxxx-yyyyy  1/1     Running   0          90s
-pod/phpmyadmin-xxxxxxxxxx-xxxxx     1/1     Running   0          90s
-
-NAME                    TYPE        CLUSTER-IP       PORT(S)
-service/mysql           ClusterIP   10.96.xxx.xxx    3306/TCP
-service/carrental-web   NodePort    10.96.xxx.xxx    80:30080/TCP
-service/phpmyadmin      NodePort    10.96.xxx.xxx    80:30081/TCP
-```
-
----
-
-## Step 6 — Access the Application
-
-### Get the Minikube node IP
-
-```bash
-minikube ip
-```
-
-Example output: `192.168.49.2`
-
-### Open in your browser
-
-| Page              | URL                               |
-|-------------------|-----------------------------------|
-| Car Rental Portal | `http://192.168.49.2:30080`       |
-| Admin Panel       | `http://192.168.49.2:30080/admin` |
-| phpMyAdmin        | `http://192.168.49.2:30081`       |
-
-> **Tip:** Minikube also has a shortcut:
-> ```bash
-> minikube service carrental-web -n carrental
-> ```
-> This opens the browser automatically.
-
-### Default Credentials
-
-**Admin Panel** (`/admin`):
-- Username: `admin`
-- Password: `Test@123`
-
-**phpMyAdmin** (database GUI):
-- Server: `mysql`
-- Username: `root`
-- Password: `rootpassword`
 
 ---
 
 ## CI/CD with GitHub Actions
 
-The pipeline lives at `.github/workflows/ci-cd.yml` and has three jobs:
+This is the core of the repo: `.github/workflows/ci-cd.yml`.
 
-| Job                 | Runs on           | Trigger                          | What it does |
-|---------------------|-------------------|-----------------------------------|--------------|
-| `lint-and-validate`  | GitHub-hosted     | Every push & PR to `main`        | `php -l` syntax-checks every file in `app/`, and `kubeconform` validates every manifest in `k8s/` against the Kubernetes schema. |
-| `build-and-push`     | GitHub-hosted     | Push to `main` only (not PRs)    | Builds `app/Dockerfile` and `mysql/Dockerfile`, tags each image `latest` + `sha-<commit>`, pushes both to Docker Hub. |
-| `deploy`             | **Self-hosted** (your EC2 box) | After `build-and-push` succeeds | `kubectl apply -f k8s/`, then pins `carrental-web` to the freshly-built `sha-<commit>` image and waits for the rollout to finish. |
+### Pipeline Overview
 
-A PR only runs lint/validate. Merging to `main` builds, pushes, and deploys.
+```
+┌─────────────────────┐
+│ PR → main            │──► lint-and-validate   (only this job runs)
+└─────────────────────┘
 
-### One-time setup
+┌─────────────────────┐     ┌──────────────────┐     ┌────────────────────────┐
+│ push → main          │────►│ lint-and-validate │────►│ build-and-push         │
+│ (merge / direct push)│     │ (GitHub-hosted)   │     │ (GitHub-hosted)        │
+└─────────────────────┘     └──────────────────┘     └───────────┬────────────┘
+                                                                   │
+                                                                   ▼
+                                                    ┌───────────────────────────┐
+                                                    │ deploy                    │
+                                                    │ (self-hosted runner, EC2) │
+                                                    │ kubectl apply + set image │
+                                                    └───────────────────────────┘
+```
 
-**1. Repo secrets** (Settings → Secrets and variables → Actions):
-| Secret | Value |
+A pull request only runs lint/validate — nothing is built, pushed, or deployed. Only a push (or merge) to `main` runs the full chain.
+
+### Job-by-Job Breakdown
+
+#### 1. `lint-and-validate` — runs on every PR and push to `main`
+| Step | What it does |
+|---|---|
+| Checkout | Clones the repo |
+| Set up PHP 8.2 | Matches the version in `app/Dockerfile` |
+| PHP syntax check | Runs `php -l` on every `.php` file under `app/` — catches syntax errors before they ship |
+| Install kubeconform | Downloads the `kubeconform` binary |
+| Validate K8s manifests | Runs `kubeconform -strict -summary -ignore-missing-schemas k8s/*.yaml` — catches malformed YAML or invalid Kubernetes fields |
+
+If either check fails, the pipeline stops here — nothing downstream runs.
+
+#### 2. `build-and-push` — only on push to `main`, after lint passes
+| Step | What it does |
+|---|---|
+| Checkout | Clones the repo |
+| Compute image tag | Derives `sha-<first 7 chars of commit SHA>` so every build is traceable to a commit |
+| Set up Docker Buildx | Enables layer caching between runs |
+| Log in to Docker Hub | Using the `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN` secrets |
+| Build & push web image | `app/Dockerfile` → `  <user>/carrental-web:latest` and `:sha-xxxxxxx` |
+| Build & push mysql image | `mysql/Dockerfile` → `<user>/carrental-mysql:latest` and `:sha-xxxxxxx` |
+
+The `sha-xxxxxxx` tag is passed to the `deploy` job as an output, so deploy always rolls out the *exact* image that was just built — never a stale `:latest`.
+
+#### 3. `deploy` — only after `build-and-push` succeeds, runs on your self-hosted runner
+| Step | What it does |
+|---|---|
+| Checkout | Pulls the latest `k8s/` manifests |
+| Verify kubectl access | `kubectl config current-context && kubectl get nodes` — fails fast with a clear error if the runner can't reach the cluster |
+| Apply manifests | `kubectl apply -f k8s/` — picks up any manifest changes (new ConfigMap keys, resource limits, etc.) |
+| Roll out new web image | `kubectl set image deployment/carrental-web carrental-web=<user>/carrental-web:sha-xxxxxxx -n carrental`, then `kubectl rollout status` waits up to 180s for the new pods to become ready |
+
+This job is gated behind a GitHub **Environment** named `production` (see Step 6 below) so you can require manual approval before it touches the cluster.
+
+> `k8s/04-mysql-deployment.yaml` runs stock `mysql:8.0`, not the custom `mysql/` image — so `deploy` only rolls out `carrental-web`. The mysql image is still built/pushed for parity with local `docker-compose`.
+
+---
+
+## Setting Up the Pipeline — Step by Step
+
+### Step 1 — Create a Docker Hub Access Token
+1. Log in to [hub.docker.com](https://hub.docker.com)
+2. **Account Settings → Security → New Access Token**
+3. Name it (e.g. `github-actions-carrental`), copy the token — you won't see it again
+
+### Step 2 — Add Repository Secrets
+In this GitHub repo: **Settings → Secrets and variables → Actions → New repository secret**
+
+| Secret name | Value |
 |---|---|
 | `DOCKERHUB_USERNAME` | Your Docker Hub username |
-| `DOCKERHUB_TOKEN` | A Docker Hub [access token](https://hub.docker.com/settings/security) (not your password) |
+| `DOCKERHUB_TOKEN` | The access token from Step 1 |
 
-**2. Self-hosted runner on your EC2 instance**, where the Kubernetes cluster (Minikube/k3s/kind) also runs:
+### Step 3 — Confirm the EC2 Instance Is Ready
+SSH into the EC2 box that hosts your Kubernetes cluster and confirm `kubectl` already works:
 ```bash
-# On the EC2 box
+kubectl get nodes
+kubectl get pods -n carrental
+```
+If this doesn't work yet, go set up the cluster first (see the [Docker + Kubernetes repo](https://github.com/chetan080808/docker-k8s-carrental)) — the runner itself doesn't install or configure Kubernetes, it just needs `kubectl` to already be pointed at a working cluster.
+
+### Step 4 — Get a Runner Registration Token
+In this GitHub repo: **Settings → Actions → Runners → New self-hosted runner → Linux → x64**
+
+GitHub shows a `./config.sh --url ... --token ...` command with a short-lived token — copy it (or just the token), you'll use it in the next step.
+
+### Step 5 — Install the Runner on EC2
+Run these on the EC2 instance, as a dedicated non-root user if possible:
+
+```bash
+# 1. Create a folder and download the runner
 mkdir actions-runner && cd actions-runner
-curl -o actions-runner.tar.gz -L https://github.com/actions/runner/releases/latest/download/actions-runner-linux-x64.tar.gz
+curl -o actions-runner.tar.gz -L \
+  https://github.com/actions/runner/releases/latest/download/actions-runner-linux-x64.tar.gz
 tar xzf actions-runner.tar.gz
-./config.sh --url https://github.com/<you>/<repo> --token <token-from-repo-settings>
+
+# 2. Register it against this repo (use the URL/token from Step 4)
+./config.sh --url https://github.com/chetan080808/Carrental_Ci-CD --token <TOKEN_FROM_STEP_4>
+# Accept the default name and the default label "self-hosted" when prompted —
+# the workflow's `runs-on: [self-hosted]` targets that label directly.
+
+# 3. Install and start it as a systemd service, so it survives reboots
 sudo ./svc.sh install
 sudo ./svc.sh start
 ```
-Get the registration token from **Settings → Actions → Runners → New self-hosted runner**. Leave the default label (`self-hosted`) — the workflow targets it as-is.
 
-The runner's user needs a working `kubectl` pointed at your cluster (`kubectl config current-context` should succeed) — same shell/user the runner service runs as.
+Notes:
+- The runner only makes **outbound** HTTPS (443) connections to GitHub to poll for jobs — no inbound security group rules are needed for it.
+- It must run as (or have access to) whichever OS user has a working `kubectl` config (`~/.kube/config`) for the cluster — check this matches the user `svc.sh` runs the service as.
 
-**3. (Optional) Protect the deploy step** — create a GitHub **Environment** named `production` (Settings → Environments) and add required reviewers. The `deploy` job already targets this environment, so once configured, every deploy waits for manual approval before touching the cluster.
+### Step 6 — Verify the Runner Is Online
+- **GitHub UI**: Settings → Actions → Runners should show it with a green "Idle" dot.
+- **On the EC2 box**: `sudo ./svc.sh status` should show it active/running.
 
-> Note: `k8s/04-mysql-deployment.yaml` currently runs the stock `mysql:8.0` image and loads data via an init container that curls `carrental.sql` from GitHub — it doesn't consume the `mysql/` custom image. The pipeline still builds/pushes it for parity with local `docker-compose`, but deploy only rolls out `carrental-web`. Say the word if you'd rather have the mysql Deployment use the built image instead.
+### Step 7 — (Recommended) Add a Manual Approval Gate
+**Settings → Environments → New environment → `production`**, then add yourself as a **required reviewer**.
 
----
-
-## Next Steps
-
-Once you are comfortable with this setup, explore:
-
-- **Helm Charts** — package your K8s manifests as a reusable chart
-- **Horizontal Pod Autoscaler (HPA)** — auto-scale based on CPU/memory
-- **Liveness & Readiness Probes** — already configured in this project, read more in the K8s docs
-- **Resource Limits** — add `resources.requests` and `resources.limits` to each container
-- **Sealed Secrets / Vault** — proper secrets management for production
-- **Cloud Deployment (AWS)** — migrate this same setup to EKS, ECR, and RDS
+The `deploy` job already declares `environment: production`, so once this exists, every run pauses for your approval before `kubectl` touches the cluster — a safety net against an accidental bad merge auto-deploying.
 
 ---
 
-## Step 7 — Optional: Use Ingress (Domain-Based Access)
+## Running & Watching the Pipeline
 
-Instead of using IP:port, you can access the app via a custom domain.
+- **Trigger it**: push or merge a commit to `main` (or open a PR to see just lint/validate run).
+- **Watch it**: GitHub repo → **Actions** tab → click the running workflow to see live logs per job.
+- **Self-hosted job logs**: also written locally on the EC2 box under `actions-runner/_diag/`.
+- **Re-run a failed job**: from the workflow run page → "Re-run jobs" → "Re-run failed jobs" (keeps the same image tag, doesn't rebuild if only `deploy` failed... actually it does rebuild since build-and-push also re-runs — that's expected and harmless, just re-pushes the same commit's image).
 
-### Enable the Ingress addon
-
+### Rolling Back a Bad Deploy
 ```bash
-minikube addons enable ingress
-```
+# See rollout history
+kubectl rollout history deployment/carrental-web -n carrental
 
-### Apply the Ingress manifest
+# Roll back to the previous version
+kubectl rollout undo deployment/carrental-web -n carrental
 
-```bash
-kubectl apply -f k8s/10-ingress.yaml
-```
-
-### Add hosts entries
-
-Get the Minikube IP:
-```bash
-minikube ip
-```
-
-**Windows** — edit `C:\Windows\System32\drivers\etc\hosts` as Administrator:
-```
-192.168.49.2  carrental.local
-192.168.49.2  pma.carrental.local
-```
-
-**Linux / Mac** — edit `/etc/hosts`:
-```bash
-sudo nano /etc/hosts
-# Add:
-192.168.49.2  carrental.local
-192.168.49.2  pma.carrental.local
-```
-
-### Access via domain
-
-| Page              | URL                               |
-|-------------------|-----------------------------------|
-| Car Rental Portal | `http://carrental.local`          |
-| phpMyAdmin        | `http://pma.carrental.local`      |
-
----
-
-## Kubernetes Concepts Explained
-
-### What is a Namespace?
-A namespace is like a folder that groups related resources together.  
-All resources in this project live in the `carrental` namespace.
-
-### What is a Deployment?
-A Deployment ensures your pods are always running. If a pod crashes,
-Kubernetes automatically restarts it. It also manages rolling updates.
-
-### What is a Service?
-A Service gives a stable network address to a pod (or group of pods).
-Pods are temporary; services are permanent.
-
-- **ClusterIP** — internal only (used for MySQL — never exposed externally)
-- **NodePort** — accessible from outside on a fixed port (30000–32767)
-- **LoadBalancer** — cloud provider gives a public IP (used in GKE, EKS, AKS)
-
-### What is a PersistentVolumeClaim (PVC)?
-A PVC reserves disk space for a pod. Without it, MySQL data is lost
-when the pod restarts. The PVC keeps data safe across pod restarts.
-
-### What is a Secret?
-A Secret stores sensitive values like passwords.  
-Values are base64-encoded (NOT encrypted by default — use Vault or Sealed Secrets in production).
-
-### What is a ConfigMap?
-A ConfigMap stores non-sensitive configuration like hostnames and database names.
-
-### What is an InitContainer?
-An init container runs and completes before the main container starts.  
-In this project, it waits for MySQL to be ready before the PHP app starts.
-
----
-
-## Useful kubectl Commands
-
-```bash
-# See all resources in the namespace
-kubectl get all -n carrental
-
-# Watch pods in real-time
-kubectl get pods -n carrental -w
-
-# View logs from the web pod
-kubectl logs -n carrental deployment/carrental-web
-
-# View logs from MySQL
-kubectl logs -n carrental deployment/mysql
-
-# Describe a pod (useful for debugging)
-kubectl describe pod -n carrental <pod-name>
-
-# Open a shell inside the web container
-kubectl exec -it -n carrental deployment/carrental-web -- bash
-
-# Open a MySQL shell
-kubectl exec -it -n carrental deployment/mysql -- mysql -u root -prootpassword carrental
-
-# Scale web pods up or down
-kubectl scale deployment carrental-web -n carrental --replicas=3
-
-# Delete and re-create all resources
-kubectl delete -f k8s/
-kubectl apply -f k8s/
+# Or pin to a specific known-good commit's image
+kubectl set image deployment/carrental-web \
+  carrental-web=<user>/carrental-web:sha-<good-commit> -n carrental
 ```
 
 ---
 
-## Changing the Database Password
+## Troubleshooting the Pipeline
 
-1. Edit `k8s/01-secret.yaml`. Encode your new password:
+| Symptom | Likely cause / fix |
+|---|---|
+| Runner shows offline in GitHub UI | `sudo ./svc.sh status` on EC2 — restart with `sudo ./svc.sh start`; check outbound 443 to `github.com`/`*.actions.githubusercontent.com` isn't blocked by the security group or a NACL |
+| `docker/login-action` step fails | `DOCKERHUB_TOKEN` expired or revoked — generate a new one (Step 1) and update the repo secret |
+| `deploy` fails at "Verify kubectl access" | The OS user running the runner service doesn't have a valid `~/.kube/config` — confirm with `kubectl get nodes` as that same user |
+| `kubectl rollout status` times out | New pod isn't becoming Ready — check `kubectl describe pod -n carrental <pod>` and `kubectl logs` for probe failures or `ImagePullBackOff` (image tag mismatch or Docker Hub auth issue) |
+| `deploy` job never starts | It only runs after `build-and-push`, which only runs on a **push to `main`** — PRs intentionally skip it |
+| Workflow doesn't trigger at all | Confirm the push actually landed on `main` and `.github/workflows/ci-cd.yml` is on that branch |
 
+---
+
+## Decommissioning the Runner
+
+If you ever need to remove the runner (e.g. replacing the EC2 instance):
 ```bash
-echo -n 'MyNewPassword' | base64
-```
-
-2. Replace the values in the file.
-
-3. Re-apply:
-```bash
-kubectl apply -f k8s/01-secret.yaml
-kubectl rollout restart deployment/mysql -n carrental
-kubectl rollout restart deployment/carrental-web -n carrental
+sudo ./svc.sh stop
+sudo ./svc.sh uninstall
+./config.sh remove --token <removal-token-from-GitHub-UI>
 ```
 
 ---
 
-## Troubleshooting
+## Accessing the Deployed App
 
-### Pod is in `Pending` state
-```bash
-kubectl describe pod <pod-name> -n carrental
-```
-Usually caused by:
-- Not enough CPU/memory — increase Minikube resources: `minikube start --memory=4096`
-- PVC not bound — check `kubectl get pvc -n carrental`
+Once `deploy` succeeds, the app is reachable the same way it was in the Docker+K8s stage — NodePort or Ingress, depending on how `k8s/07-web-service.yaml` / `k8s/10-ingress.yaml` are configured. Full access instructions (node IP, ports, Ingress hosts file setup) are in the [Docker + Kubernetes repo](https://github.com/chetan080808/docker-k8s-carrental).
 
-### Pod is in `ImagePullBackOff` or `ErrImagePull`
-The image cannot be pulled from Docker Hub.  
-- Check the image name in the deployment YAML matches exactly what you pushed
-- Make sure you ran `docker push` successfully
-- Check Docker Hub: `https://hub.docker.com/u/chetan0808`
+**Default credentials** (seeded by `carrental.sql`):
 
-### Web app shows database connection error
-MySQL might not be ready yet. Wait 30–60 seconds and refresh.  
-Check MySQL logs:
-```bash
-kubectl logs -n carrental deployment/mysql
-```
-
-### Cannot access `http://<ip>:30080`
-- Confirm the pod is `Running`: `kubectl get pods -n carrental`
-- On Minikube, use: `minikube service carrental-web -n carrental`
-
-### Ingress not working
-```bash
-kubectl get ingress -n carrental
-kubectl describe ingress carrental-ingress -n carrental
-```
-Make sure the Ingress addon is enabled: `minikube addons enable ingress`
+| Area | Username | Password |
+|---|---|---|
+| Admin Panel (`/admin`) | `admin` | `Test@123` |
+| phpMyAdmin / MySQL root | `root` | `rootpassword` |
 
 ---
 
-## Tear Down
+## Roadmap — Stage 4: AWS Migration
 
-To stop and delete everything:
+Once this pipeline is solid, the next stage replaces the self-managed EC2+Minikube cluster with:
+- **EKS** instead of Minikube/k3s on EC2
+- **ECR** instead of (or alongside) Docker Hub
+- **RDS** instead of the in-cluster MySQL pod
+- A GitHub-hosted (not self-hosted) deploy job authenticating to AWS via OIDC, since EKS is reachable over the internet
 
-```bash
-# Delete all K8s resources
-kubectl delete -f k8s/
-
-# Stop Minikube
-minikube stop
-
-# Delete Minikube cluster (removes all data)
-minikube delete
-```
-
+Also worth exploring regardless of AWS timing:
+- **Helm charts** to replace the raw `k8s/*.yaml` files
+- **Horizontal Pod Autoscaler (HPA)**
+- **Sealed Secrets / Vault** instead of base64 Secrets
