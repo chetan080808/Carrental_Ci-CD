@@ -1,0 +1,38 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: carrental-ingress
+  namespace: carrental
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: carrental.local        # Add this to your /etc/hosts for local testing
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: carrental-web
+                port:
+                  number: 80
+    - host: pma.carrental.local    # phpMyAdmin via Ingress
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: phpmyadmin
+                port:
+                  number: 80
+
+# SETUP (Minikube):
+#   minikube addons enable ingress
+#   minikube ip    <- get your node IP, e.g. 192.168.49.2
+#   Add to /etc/hosts (Linux/Mac) or C:\Windows\System32\drivers\etc\hosts (Windows):
+#     192.168.49.2  carrental.local
+#     192.168.49.2  pma.carrental.local
+# Then visit http://carrental.local in your browser.

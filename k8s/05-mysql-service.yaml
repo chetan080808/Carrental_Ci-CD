@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql             # IMPORTANT: this name must match DB_HOST in configmap
+  namespace: carrental
+  labels:
+    app: mysql
+spec:
+  selector:
+    app: mysql
+  ports:
+    - port: 3306
+      targetPort: 3306
+  type: ClusterIP         # Internal only — MySQL is never exposed to the internet

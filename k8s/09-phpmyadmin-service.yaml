@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: phpmyadmin
+  namespace: carrental
+  labels:
+    app: phpmyadmin
+spec:
+  selector:
+    app: phpmyadmin
+  ports:
+    - port: 80
+      targetPort: 80
+      nodePort: 30081     # Access via http://<node-ip>:30081
+  type: NodePort

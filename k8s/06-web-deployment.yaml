@@ -1,0 +1,68 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: carrental-web
+  namespace: carrental
+  labels:
+    app: carrental-web
+spec:
+  replicas: 2             # 2 replicas for high availability
+  selector:
+    matchLabels:
+      app: carrental-web
+  template:
+    metadata:
+      labels:
+        app: carrental-web
+    spec:
+      initContainers:
+        # Wait until MySQL is ready before starting the web container
+        - name: wait-for-mysql
+          image: busybox:1.28
+          command:
+            - sh
+            - -c
+            - |
+              until nc -z mysql 3306; do
+                echo "Waiting for MySQL to be ready..."
+                sleep 3
+              done
+              echo "MySQL is ready!"
+      containers:
+        - name: carrental-web
+          image: chetan0808/carrental-web:latest   # prebuilt image on Docker Hub
+          ports:
+            - containerPort: 80
+          env:
+            - name: DB_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: carrental-config
+                  key: DB_HOST
+            - name: DB_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: carrental-config
+                  key: DB_NAME
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-secret
+                  key: mysql-user
+            - name: DB_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-secret
+                  key: mysql-password
+          readinessProbe:
+            httpGet:
+              path: /index.php
+              port: 80
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /index.php
+              port: 80
+            initialDelaySeconds: 30
+            periodSeconds: 20

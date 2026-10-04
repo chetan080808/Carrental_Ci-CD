@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mysql-pvc
+  namespace: carrental
+spec:
+  accessModes:
+    - ReadWriteOnce       # single node read/write (suitable for MySQL)
+  resources:
+    requests:
+      storage: 1Gi        # 1 GB is sufficient for this project
