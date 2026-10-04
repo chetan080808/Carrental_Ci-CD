@@ -2,7 +2,7 @@
 
 ## 🚀 A DevOps Project, Built One Level at a Time
 
-This isn't a project that showed up finished. It's being **leveled up stage by stage**, on purpose — the same way most real teams actually adopt DevOps: start with something that just runs, then containerize it, then orchestrate it, then automate it, then take it to the cloud. Each stage is a complete, working checkpoint before the next one begins.
+This isn't a project that showed up finished. It's being **leveled up stage by stage**, on purpose, the same way most real teams actually adopt DevOps: start with something that just runs, then containerize it, then orchestrate it, then automate it, then take it to the cloud. Each stage is a complete, working checkpoint before the next one begins.
 
 If you're a student following along, that's the point: **don't skip to the end**. Clone each stage, see what changed and why, and build the muscle memory one layer at a time instead of inheriting a finished black box.
 
@@ -26,7 +26,7 @@ If you're a student following along, that's the point: **don't skip to the end**
 | 3. **Docker + K8s + CI/CD** | **Automate build → push → deploy with GitHub Actions** | **👉 this repo** |
 | 4. AWS Migration | Move the whole stack to EKS / ECR / RDS | upcoming |
 
-This README focuses on stage 3 — the pipeline that turns "I manually build, push, and `kubectl apply` every time" into "I push code and the rest happens by itself." For how the app was containerized and how the Kubernetes manifests in `k8s/` work in detail, see the [Docker + Kubernetes repo](https://github.com/chetan080808/docker-k8s-carrental) — that's required reading before this stage makes sense.
+This README focuses on stage 3 — the pipeline that turns "I manually build, push, and `kubectl apply` every time" into "I push code and the rest happens by itself." For how the app was containerized and how the Kubernetes manifests in `k8s/` work in detail, see the [Docker + Kubernetes repo](https://github.com/chetan080808/docker-k8s-carrental) that's required reading before this stage makes sense.
 
 ---
 
@@ -58,22 +58,7 @@ Before touching the pipeline, you need stages 1–2 already done:
 | A Docker Hub account | Destination registry for built images |
 | Admin access to this GitHub repo's **Settings** | To add secrets and register the runner |
 
-If any of the above isn't done yet, do that first — this README assumes it's working.
-
----
-
-## Push This Repo to GitHub
-
-```bash
-git add .
-git commit -m "Initial commit: Docker + K8s + CI/CD setup"
-git push -u origin main
-```
-
-`.gitignore` already excludes `.claude/` (Claude Code's local settings) so it never reaches GitHub. If it was ever committed in an earlier attempt, untrack it:
-```bash
-git rm -r --cached .claude
-```
+If any of the above isn't done yet, do that first, this README assumes it's working.
 
 ---
 
@@ -101,11 +86,11 @@ This is the core of the repo: `.github/workflows/ci-cd.yml`.
                                                     └───────────────────────────┘
 ```
 
-A pull request only runs lint/validate — nothing is built, pushed, or deployed. Only a push (or merge) to `main` runs the full chain.
+A pull request only runs lint/validate, nothing is built, pushed, or deployed. Only a push (or merge) to `main` runs the full chain.
 
 ### Job-by-Job Breakdown
 
-#### 1. `lint-and-validate` — runs on every PR and push to `main`
+#### 1. `lint-and-validate` - runs on every PR and push to `main`
 | Step | What it does |
 |---|---|
 | Checkout | Clones the repo |
