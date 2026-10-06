@@ -14,8 +14,8 @@ If you're a student following along, that's the point: **don't skip to the end**
 │         │      │  in a      │       │  scalable pods)    │      │  production-    │
 │         │      │  container)│       │       +             │      │  grade cloud    │
 │         │      │            │       │   CI/CD (this repo)│      │  deployment     │
-│         │      │            │       │  (build→push→      │      │                 │
-│         │      │            │       │   deploy, hands-off)│      │                 │
+│         │      │            │       │  (build→scan→push→ │      │                 │
+│         │      │            │       │   deploy→test)     │      │                 │
 └─────────┘      └───────────┘        └──────────────────┘        └────────────────┘
 ```
 
@@ -23,7 +23,7 @@ If you're a student following along, that's the point: **don't skip to the end**
 |---|---|---|
 | 1. Dockerize | Take a plain PHP app and containerize it | [`Carrental_Docker_Project`](https://github.com/chetan080808/Carrental_Docker_Project) |
 | 2. Docker + Kubernetes | Deploy the containers on a Kubernetes cluster | [`Carrental_K8s-Docker_Project`](https://github.com/chetan080808/Carrental_K8s-Docker_Project) |
-| 3. **Docker + K8s + CI/CD** | **Automate build → push → deploy with GitHub Actions** | **👉 this repo** |
+| 3. **Docker + K8s + CI/CD** | **Automate build → scan → push → deploy → smoke test with GitHub Actions** | **👉 this repo** |
 | 4. AWS Migration | Move the whole stack to EKS / ECR / RDS | upcoming |
 
 This README focuses on stage 3 — the pipeline that turns "I manually build, push, and `kubectl apply` every time" into "I push code and the rest happens by itself." For how the app was containerized and how the Kubernetes manifests in `k8s/` work in detail, see the [Docker + Kubernetes repo](https://github.com/chetan080808/Carrental_K8s-Docker_Project) that's required reading before this stage makes sense.
@@ -68,62 +68,95 @@ This is the core of the repo: `.github/workflows/ci-cd.yml`.
 
 ### Pipeline Overview
 
+Think of the pipeline as an assembly line with **3 stages**. Each stage has to finish successfully before the next one starts. If any stage fails, the line stops and nothing broken goes further.
+
 ```
 ┌─────────────────────┐
-│ PR → main            │──► lint-and-validate   (only this job runs)
+│ PR → main            │──► Stage 1: Check   (only this runs)
 └─────────────────────┘
 
-┌─────────────────────┐     ┌──────────────────┐     ┌────────────────────────┐
-│ push → main          │────►│ lint-and-validate │────►│ build-and-push         │
-│ (merge / direct push)│     │ (GitHub-hosted)   │     │ (GitHub-hosted)        │
-└─────────────────────┘     └──────────────────┘     └───────────┬────────────┘
-                                                                   │
-                                                                   ▼
-                                                    ┌───────────────────────────┐
-                                                    │ deploy                    │
-                                                    │ (self-hosted runner, EC2) │
-                                                    │ kubectl apply + set image │
-                                                    └───────────────────────────┘
+┌─────────────────────┐    ┌──────────────────┐    ┌──────────────────────────┐
+│ push → main          │───►│ Stage 1: Check    │───►│ Stage 2: Build, Scan,    │
+│ (merge / direct push)│    │ lint-and-validate │    │          Push            │
+└─────────────────────┘    │ (GitHub-hosted)   │    │ build-and-push           │
+                            └──────────────────┘    │ (GitHub-hosted)          │
+                                                     └────────────┬─────────────┘
+                                                                  │
+                                                                  ▼
+                                                     ┌──────────────────────────┐
+                                                     │ Stage 3: Deploy & Test   │
+                                                     │ deploy                   │
+                                                     │ (self-hosted runner, EC2)│
+                                                     │ set tag → apply → wait   │
+                                                     │ → smoke test             │
+                                                     └──────────────────────────┘
 ```
 
-A pull request only runs lint/validate, nothing is built, pushed, or deployed. Only a push (or merge) to `main` runs the full chain.
+- **Pull request** → only Stage 1 runs. It just checks the code. Nothing is built, pushed, or deployed.
+- **Push / merge to `main`** → all 3 stages run, one after another.
 
-### Job-by-Job Breakdown
+### Stage-by-Stage Breakdown (in simple words)
 
-#### 1. `lint-and-validate` - runs on every PR and push to `main`
-| Step | What it does |
+#### Stage 1 — Check the code (`lint-and-validate`)
+**In one line:** *"Is the code written correctly?"* Like a spell-checker, it reads the files and looks for mistakes before anything else happens.
+
+Runs on: every pull request and every push to `main`.
+
+| Step | What it does (simple words) |
 |---|---|
-| Checkout | Clones the repo |
-| Set up PHP 8.2 | Matches the version in `app/Dockerfile` |
-| PHP syntax check | Runs `php -l` on every `.php` file under `app/` — catches syntax errors before they ship |
-| Install kubeconform | Downloads the `kubeconform` binary |
-| Validate K8s manifests | Runs `kubeconform -strict -summary -ignore-missing-schemas k8s/*.yaml` — catches malformed YAML or invalid Kubernetes fields |
+| Checkout | Downloads a copy of the code onto the GitHub machine |
+| Set up PHP 8.2 | Installs PHP, the same version the app uses in `app/Dockerfile` |
+| PHP syntax check | Opens every `.php` file in `app/` and checks for typos or broken code (`php -l`) |
+| Install kubeconform | Installs a small tool that knows what correct Kubernetes files look like |
+| Validate Kubernetes manifests | Checks every file in `k8s/` for mistakes, like a wrong field name or bad formatting |
 
-If either check fails, the pipeline stops here — nothing downstream runs.
+❌ If anything is wrong here, the pipeline stops. Broken code never gets built.
 
-#### 2. `build-and-push` — only on push to `main`, after lint passes
-| Step | What it does |
+#### Stage 2 — Build, scan & push the images (`build-and-push`)
+**In one line:** *"Pack the app into boxes, check the boxes are safe, then ship them to Docker Hub."*
+
+Runs on: push to `main` only, and only if Stage 1 passed.
+
+| Step | What it does (simple words) |
 |---|---|
-| Checkout | Clones the repo |
-| Compute image tag | Derives `sha-<first 7 chars of commit SHA>` so every build is traceable to a commit |
-| Set up Docker Buildx | Enables layer caching between runs |
-| Log in to Docker Hub | Using the `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN` secrets |
-| Build & push web image | `app/Dockerfile` → `  <user>/carrental-web:latest` and `:sha-xxxxxxx` |
-| Build & push mysql image | `mysql/Dockerfile` → `<user>/carrental-mysql:latest` and `:sha-xxxxxxx` |
+| Checkout | Downloads a copy of the code |
+| Compute image tag | Makes a unique label for this build, like `sha-a1b2c3d` (taken from the commit ID), so you always know which code is inside which image |
+| Set up Docker Buildx | Prepares Docker for building; also lets it reuse old pieces (cache) so builds are faster |
+| Log in to Docker Hub | Signs in using the `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN` secrets |
+| **Build web image** (local only) | Builds the web app image from `app/Dockerfile`, but keeps it **only on the GitHub machine**. It is not uploaded yet |
+| **Scan web image (Trivy)** | 🔍 A security scanner (Trivy) looks inside the image for known security holes rated **HIGH** or **CRITICAL** and prints a report |
+| **Push web image** | Uploads the image to Docker Hub as `<user>/carrental-web:latest` and `:sha-xxxxxxx` |
+| **Build mysql image** (local only) | Same idea for the database image from `mysql/Dockerfile`, kept on the GitHub machine only |
+| **Scan mysql image (Trivy)** | 🔍 Security-scans the database image the same way |
+| **Push mysql image** | Uploads it as `<user>/carrental-mysql:latest` and `:sha-xxxxxxx` |
 
-The `sha-xxxxxxx` tag is passed to the `deploy` job as an output, so deploy always rolls out the *exact* image that was just built — never a stale `:latest`.
+**Why build → scan → push in that order?** The image gets checked *before* it reaches Docker Hub, the same way you'd inspect a package before you ship it, not after it has already been delivered.
 
-#### 3. `deploy` — only after `build-and-push` succeeds, runs on your self-hosted runner
-| Step | What it does |
+> ⚠️ Right now the scan is **report-only** (`exit-code: "0"`): it shows problems but doesn't stop the pipeline. To **block** unsafe images, change `exit-code` to `"1"` in both Trivy steps.
+
+The `sha-xxxxxxx` label is handed to Stage 3, so the deploy always uses the **exact** image that was just built and scanned, never an old `:latest`.
+
+#### Stage 3 — Deploy & test (`deploy`)
+**In one line:** *"Put the new version live on the server, wait for it to start, then check the website actually opens."*
+
+Runs on: your own EC2 machine (self-hosted runner), and only if Stage 2 passed.
+
+| Step | What it does (simple words) |
 |---|---|
-| Checkout | Pulls the latest `k8s/` manifests |
-| Verify kubectl access | `kubectl config current-context && kubectl get nodes` — fails fast with a clear error if the runner can't reach the cluster |
-| Apply manifests | `kubectl apply -f k8s/` — picks up any manifest changes (new ConfigMap keys, resource limits, etc.) |
-| Roll out new web image | `kubectl set image deployment/carrental-web carrental-web=<user>/carrental-web:sha-xxxxxxx -n carrental`, then `kubectl rollout status` waits up to 180s for the new pods to become ready |
+| Checkout | Downloads the latest `k8s/` files onto the EC2 machine |
+| Verify kubectl access | Checks that the machine can talk to the Kubernetes cluster. If it can't, it stops right away with a clear error |
+| **Set image tag in manifest** | Edits `k8s/06-web-deployment.yaml` so it points to the new image (`carrental-web:sha-xxxxxxx`), then prints the line so you can see it in the logs |
+| Apply manifests | Sends all `k8s/` files to the cluster (`kubectl apply -f k8s/`). Kubernetes sees the new image and starts replacing old pods with new ones |
+| **Wait for rollout** | Waits up to 3 minutes for the new pods to start up and become healthy. If they don't, the job fails |
+| **Smoke test** | 💨 Starts a tiny temporary container inside the cluster that opens `http://carrental-web/car-listing.php`. If the page loads, the deploy passed ✅. If not (after 5 retries), the job fails ❌. The temporary container deletes itself afterwards |
 
-This job is gated behind a GitHub **Environment** named `production` (see Step 6 below) so you can require manual approval before it touches the cluster.
+**Why set the tag in the file before applying?** The image version gets written into the manifest *before* it is applied, so Kubernetes does one clean update in a single step. Doing `apply` first and changing the image afterwards would make it roll out twice.
 
-> `k8s/04-mysql-deployment.yaml` runs stock `mysql:8.0`, not the custom `mysql/` image — so `deploy` only rolls out `carrental-web`. The mysql image is still built/pushed for parity with local `docker-compose`.
+**What's a smoke test?** It's the quickest possible check: "turn it on and see if smoke comes out." It doesn't test every feature, it just proves the website is up and answering.
+
+This job is linked to a GitHub **Environment** named `production` (see Step 7 below), so you can require someone to click **Approve** before it touches the cluster.
+
+> `k8s/04-mysql-deployment.yaml` runs stock `mysql:8.0`, not the custom `mysql/` image, so `deploy` only updates `carrental-web`. The mysql image is still built, scanned and pushed so it matches your local `docker-compose` setup.
 
 ---
 
@@ -195,7 +228,7 @@ The `deploy` job already declares `environment: production`, so once this exists
 - **Trigger it**: push or merge a commit to `main` (or open a PR to see just lint/validate run).
 - **Watch it**: GitHub repo → **Actions** tab → click the running workflow to see live logs per job.
 - **Self-hosted job logs**: also written locally on the EC2 box under `actions-runner/_diag/`.
-- **Re-run a failed job**: from the workflow run page → "Re-run jobs" → "Re-run failed jobs" (keeps the same image tag, doesn't rebuild if only `deploy` failed... actually it does rebuild since build-and-push also re-runs — that's expected and harmless, just re-pushes the same commit's image).
+- **Re-run a failed job**: from the workflow run page → "Re-run jobs" → "Re-run failed jobs". Only the failed job and the ones after it run again, with the same commit and the same `sha-xxxxxxx` image tag.
 
 ### Rolling Back a Bad Deploy
 ```bash
@@ -210,6 +243,8 @@ kubectl set image deployment/carrental-web \
   carrental-web=<user>/carrental-web:sha-<good-commit> -n carrental
 ```
 
+> A manual rollback lasts until the next push to `main`. The next pipeline run will deploy that new commit's image, so fix the bug (or revert the commit) in Git too.
+
 ---
 
 ## Troubleshooting the Pipeline
@@ -219,7 +254,10 @@ kubectl set image deployment/carrental-web \
 | Runner shows offline in GitHub UI | `sudo ./svc.sh status` on EC2 — restart with `sudo ./svc.sh start`; check outbound 443 to `github.com`/`*.actions.githubusercontent.com` isn't blocked by the security group or a NACL |
 | `docker/login-action` step fails | `DOCKERHUB_TOKEN` expired or revoked — generate a new one (Step 1) and update the repo secret |
 | `deploy` fails at "Verify kubectl access" | The OS user running the runner service doesn't have a valid `~/.kube/config` — confirm with `kubectl get nodes` as that same user |
-| `kubectl rollout status` times out | New pod isn't becoming Ready — check `kubectl describe pod -n carrental <pod>` and `kubectl logs` for probe failures or `ImagePullBackOff` (image tag mismatch or Docker Hub auth issue) |
+| "Wait for rollout" times out | New pod isn't becoming Ready — check `kubectl describe pod -n carrental <pod>` and `kubectl logs` for probe failures or `ImagePullBackOff` (image tag mismatch or Docker Hub auth issue) |
+| "Set image tag in manifest" shows the old image | The `sed` pattern expects an `image: ...carrental-web:...` line in `k8s/06-web-deployment.yaml` — make sure that line exists and still contains `carrental-web:` |
+| Smoke test fails | Pods are running but the app isn't answering — check `kubectl logs -n carrental deploy/carrental-web`, confirm the `carrental-web` Service exists, and that MySQL is up (the page needs the DB) |
+| Trivy reports HIGH/CRITICAL issues | Update the base image in the Dockerfile (e.g. a newer `php` / `mysql` tag) and push again; the scan is report-only until you set `exit-code: "1"` |
 | `deploy` job never starts | It only runs after `build-and-push`, which only runs on a **push to `main`** — PRs intentionally skip it |
 | Workflow doesn't trigger at all | Confirm the push actually landed on `main` and `.github/workflows/ci-cd.yml` is on that branch |
 

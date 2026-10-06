@@ -16,6 +16,9 @@ env:
   DOCKERHUB_MYSQL_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/carrental-mysql
 
 jobs:
+  # ─────────────────────────────────────────────────────────────
+  # Stage 1: Lint & validate (runs on every push and PR)
+  # ─────────────────────────────────────────────────────────────
   lint-and-validate:
     name: Lint PHP & validate K8s manifests
     runs-on: ubuntu-latest
@@ -45,8 +48,12 @@ jobs:
       - name: Validate Kubernetes manifests
         run: kubeconform -strict -summary -ignore-missing-schemas k8s/*.yaml
 
+  # ─────────────────────────────────────────────────────────────
+  # Stage 2: Build → scan → push (main branch only)
+  # Images are scanned BEFORE they reach Docker Hub.
+  # ─────────────────────────────────────────────────────────────
   build-and-push:
-    name: Build & push Docker images
+    name: Build, scan & push Docker images
     runs-on: ubuntu-latest
     needs: lint-and-validate
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -69,7 +76,26 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build & push web image
+      # ── Web image ──────────────────────────────────────────────
+      - name: Build web image (local only, for scanning)
+        uses: docker/build-push-action@v6
+        with:
+          context: ./app
+          load: true
+          push: false
+          tags: ${{ env.DOCKERHUB_WEB_IMAGE }}:${{ steps.meta.outputs.sha_tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Scan web image (Trivy)
+        uses: aquasecurity/trivy-action@0.28.0   # pin to a release; check for the latest version
+        with:
+          image-ref: ${{ env.DOCKERHUB_WEB_IMAGE }}:${{ steps.meta.outputs.sha_tag }}
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "0"   # report only; change to "1" to block vulnerable images
+
+      - name: Push web image
         uses: docker/build-push-action@v6
         with:
           context: ./app
@@ -78,9 +104,27 @@ jobs:
             ${{ env.DOCKERHUB_WEB_IMAGE }}:latest
             ${{ env.DOCKERHUB_WEB_IMAGE }}:${{ steps.meta.outputs.sha_tag }}
           cache-from: type=gha
+
+      # ── MySQL image ────────────────────────────────────────────
+      - name: Build mysql image (local only, for scanning)
+        uses: docker/build-push-action@v6
+        with:
+          context: ./mysql
+          load: true
+          push: false
+          tags: ${{ env.DOCKERHUB_MYSQL_IMAGE }}:${{ steps.meta.outputs.sha_tag }}
+          cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Build & push mysql image
+      - name: Scan mysql image (Trivy)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ env.DOCKERHUB_MYSQL_IMAGE }}:${{ steps.meta.outputs.sha_tag }}
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "0"
+
+      - name: Push mysql image
         uses: docker/build-push-action@v6
         with:
           context: ./mysql
@@ -89,8 +133,10 @@ jobs:
             ${{ env.DOCKERHUB_MYSQL_IMAGE }}:latest
             ${{ env.DOCKERHUB_MYSQL_IMAGE }}:${{ steps.meta.outputs.sha_tag }}
           cache-from: type=gha
-          cache-to: type=gha,mode=max
 
+  # ─────────────────────────────────────────────────────────────
+  # Stage 3: Deploy + smoke test (self-hosted runner on EC2)
+  # ─────────────────────────────────────────────────────────────
   deploy:
     name: Deploy to Kubernetes (EC2)
     runs-on: [self-hosted]
@@ -103,12 +149,21 @@ jobs:
       - name: Verify kubectl access
         run: kubectl config current-context && kubectl get nodes
 
+      - name: Set image tag in manifest
+        run: |
+          sed -i "s|image: .*carrental-web:.*|image: ${{ env.DOCKERHUB_WEB_IMAGE }}:${{ needs.build-and-push.outputs.image_tag }}|" \
+            k8s/06-web-deployment.yaml
+          grep -n "image:" k8s/06-web-deployment.yaml
+
       - name: Apply manifests
         run: kubectl apply -f k8s/
 
-      - name: Roll out new web image
+      - name: Wait for rollout
+        run: kubectl rollout status deployment/carrental-web -n carrental --timeout=180s
+
+      - name: Smoke test
         run: |
-          kubectl set image deployment/carrental-web \
-            carrental-web=${{ env.DOCKERHUB_WEB_IMAGE }}:${{ needs.build-and-push.outputs.image_tag }} \
-            -n carrental
-          kubectl rollout status deployment/carrental-web -n carrental --timeout=180s
+          kubectl run smoke-${{ github.run_id }} --rm -i --quiet --restart=Never \
+            -n carrental --image=curlimages/curl -- \
+            curl -sf --retry 5 --retry-delay 3 --retry-all-errors \
+            -o /dev/null -w "%{http_code}\n" http://carrental-web/car-listing.php
