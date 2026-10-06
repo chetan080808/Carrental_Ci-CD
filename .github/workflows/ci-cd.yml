@@ -88,7 +88,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Scan web image (Trivy)
-        uses: aquasecurity/trivy-action@0.28.0   # pin to a release; check for the latest version
+        uses: aquasecurity/trivy-action@v0.36.0   # pin to a release; check for the latest version
         with:
           image-ref: ${{ env.DOCKERHUB_WEB_IMAGE }}:${{ steps.meta.outputs.sha_tag }}
           severity: CRITICAL,HIGH
@@ -117,7 +117,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Scan mysql image (Trivy)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ env.DOCKERHUB_MYSQL_IMAGE }}:${{ steps.meta.outputs.sha_tag }}
           severity: CRITICAL,HIGH
